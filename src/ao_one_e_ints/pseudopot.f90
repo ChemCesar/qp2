@@ -1095,9 +1095,9 @@ double precision function overlap_orb_ylm_grid(nptsgrid,r_orb,npower_orb,center_
 implicit none
 !! PSEUDOS
 integer nptsgridmax,nptsgrid
-double precision coefs_pseudo,ptsgrid
 parameter(nptsgridmax=50)
-common/pseudos/coefs_pseudo(nptsgridmax),ptsgrid(nptsgridmax,3)
+double precision coefs_pseudo(nptsgridmax),ptsgrid(nptsgridmax,3)
+common/pseudos/coefs_pseudo,ptsgrid
 !!!!!
 integer npower_orb(3),l,m,i
 double precision x,g_orb,two_pi,dx,dphi,term,orb_phi,ylm_real,sintheta,r_orb,phi,center_orb(3)
@@ -1235,10 +1235,10 @@ end
       subroutine initpseudos(nptsgrid)
       implicit none
       integer nptsgridmax,nptsgrid,ik
-      double precision coefs_pseudo,ptsgrid
       double precision p,q,r,s
       parameter(nptsgridmax=50)
-      common/pseudos/coefs_pseudo(nptsgridmax),ptsgrid(nptsgridmax,3)
+      double precision coefs_pseudo(nptsgridmax),ptsgrid(nptsgridmax,3)
+      common/pseudos/coefs_pseudo,ptsgrid
 
       p=1.d0/dsqrt(2.d0)
       q=1.d0/dsqrt(3.d0)
@@ -1869,7 +1869,7 @@ double precision function int_prod_bessel(l,gam,n,m,a,b,arg)
       qk = dble(q)
       two_qkmp1 = 2.d0*(qk+mk)+1.d0
       do k=0,q-1
-        if (s_q_k < 1.d-32) then
+        if (s_q_k < 1.d-20) then
           s_q_k = 0.d0
           exit
         endif
@@ -1950,26 +1950,26 @@ xq(17)=-3.34785456738322
 xq(18)=-3.94476404011563
 xq(19)=-4.60368244955074
 xq(20)=-5.38748089001123
-wq(1)=  2.229393645534151E-013
-wq(2)=  4.399340992273176E-010
-wq(3)=  1.086069370769280E-007
-wq(4)=  7.802556478532063E-006
-wq(5)=  2.283386360163528E-004
-wq(6)=  3.243773342237853E-003
-wq(7)=  2.481052088746362E-002
+wq(1)=  2.229393645534151D-013
+wq(2)=  4.399340992273176D-010
+wq(3)=  1.086069370769280D-007
+wq(4)=  7.802556478532063D-006
+wq(5)=  2.283386360163528D-004
+wq(6)=  3.243773342237853D-003
+wq(7)=  2.481052088746362D-002
 wq(8)=  0.109017206020022
 wq(9)=  0.286675505362834
 wq(10)= 0.462243669600610
 wq(11)= 0.462243669600610
 wq(12)= 0.286675505362834
 wq(13)= 0.109017206020022
-wq(14)= 2.481052088746362E-002
-wq(15)= 3.243773342237853E-003
-wq(16)= 2.283386360163528E-004
-wq(17)= 7.802556478532063E-006
-wq(18)= 1.086069370769280E-007
-wq(19)= 4.399340992273176E-010
-wq(20)= 2.229393645534151E-013
+wq(14)= 2.481052088746362D-002
+wq(15)= 3.243773342237853D-003
+wq(16)= 2.283386360163528D-004
+wq(17)= 7.802556478532063D-006
+wq(18)= 1.086069370769280D-007
+wq(19)= 4.399340992273176D-010
+wq(20)= 2.229393645534151D-013
 
       npts=20
 !      call gauher(xq,wq,npts)

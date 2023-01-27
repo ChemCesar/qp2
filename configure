@@ -99,7 +99,7 @@ PACKAGES=$(echo $PACKAGES | xargs)
 
 echo "export QP_ROOT=\"$QP_ROOT\"" > ${QP_ROOT}/etc/00.qp_root.rc
 
-source quantum_package.rc
+source ${QP_ROOT}/quantum_package.rc
 
 
 
@@ -180,7 +180,7 @@ if [[ "${PACKAGES}.x" != ".x" ]] ; then
 fi
 
 if [[ ${PACKAGES} = all ]] ; then
-        PACKAGES="zlib ninja zeromq f77zmq gmp ocaml docopt resultsFile bats"
+        PACKAGES="zlib ninja zeromq f77zmq gmp ocaml docopt resultsFile bats bse"
 fi
 
 
@@ -246,7 +246,7 @@ EOF
             execute << EOF
               cd "\${QP_ROOT}"/external
               tar --gunzip --extract --file qp2-dependencies/bse-v0.8.11.tar.gz
-              pip install -e basis_set_exchange-*
+              python3 -m pip install -e basis_set_exchange-*
 EOF
 
     elif [[ ${PACKAGE} = zlib ]] ; then
@@ -281,8 +281,8 @@ EOF
 
             execute << EOF
               cd "\${QP_ROOT}"/external
-              tar -zxf qp2-dependencies/bats-v1.1.0.tar.gz
-              ( cd bats-core-1.1.0/ ; ./install.sh \${QP_ROOT})
+              tar -zxf qp2-dependencies/bats-v1.7.0.tar.gz
+              ( cd bats-core-1.7.0/ ; ./install.sh \${QP_ROOT})
 EOF
 
     else
@@ -293,7 +293,7 @@ EOF
 
 done
 
-source quantum_package.rc
+source ${QP_ROOT}/quantum_package.rc
 
 NINJA=$(find_exe ninja)
 if [[ ${NINJA} = $(not_found) ]] ; then
@@ -303,6 +303,25 @@ fi
 
 ZEROMQ=$(find_lib -lzmq)
 if [[ ${ZEROMQ} = $(not_found) ]] ; then
+
+        MAKE=$(find_exe make)
+        if [[ ${MAKE} = $(not_found) ]] ; then
+                error "make is not installed."
+                fail
+        fi
+
+        M4=$(find_exe autoreconf)
+        if [[ ${M4} = $(not_found) ]] ; then
+                error "autoreconf is not installed."
+                fail
+        fi
+
+        M4=$(find_exe m4)
+        if [[ ${M4} = $(not_found) ]] ; then
+                error "m4 preprocesssor is not installed."
+                fail
+        fi
+
         error "ZeroMQ (zeromq) is not installed."
         fail
 fi
@@ -354,12 +373,6 @@ echo "                 ||----w |     "
 echo "                 ||     ||     "
 echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 echo ""
-echo "If you have PIP, you can install the Basis Set Exchange command-line tool:"
-echo ""
-echo "  ./configure -i bse"
-echo ""
-echo "This will enable the usage of qp_basis to install extra basis sets."
-echo ""
 echo ""
 printf "\e[m\n"
 
@@ -375,7 +388,7 @@ else
       echo ""
       echo "${QP_ROOT}/build.ninja does not exist,"
       echo "you need to specify the COMPILATION configuration file."
-      echo "See  ./configure --help  for more details."
+      echo "See  ./configure -h  for more details."
       echo ""
 fi
 

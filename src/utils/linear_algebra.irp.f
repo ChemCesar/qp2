@@ -1,4 +1,7 @@
-subroutine svd(A,LDA,U,LDU,D,Vt,LDVt,m,n)
+
+! ---
+
+subroutine svd(A, LDA, U, LDU, D, Vt, LDVt, m, n)
   implicit none
   BEGIN_DOC
   ! Compute A = U.D.Vt
@@ -1133,6 +1136,104 @@ subroutine ortho_svd(A,LDA,m,n)
 
 end
 
+!subroutine ortho_qr_withB(A,LDA,B,m,n)
+!  implicit none
+!  BEGIN_DOC
+!  ! Orthogonalization using Q.R factorization
+!  !
+!  ! A : Overlap Matrix
+!  !
+!  ! LDA : leftmost dimension of A
+!  !
+!  ! m : Number of rows of A
+!  !
+!  ! n : Number of columns of A
+!  !
+!  ! B : Output orthogonal basis
+!  !
+!  END_DOC
+!  integer, intent(in)            :: m,n, LDA
+!  double precision, intent(inout) :: A(LDA,n)
+!  double precision, intent(inout) :: B(LDA,n)
+!
+!  integer                        :: LWORK, INFO
+!  integer, allocatable           :: jpvt(:)
+!  double precision, allocatable  :: TAU(:), WORK(:)
+!  double precision, allocatable  :: C(:,:)
+!  double precision :: norm
+!  integer :: i,j
+!
+!  allocate (TAU(min(m,n)), WORK(1))
+!  allocate (jpvt(n))
+!  !print *," In function ortho"
+!  B = A
+!
+!  jpvt(1:n)=1
+!
+!  LWORK=-1
+!  call dgeqp3( m, n, A, LDA, jpvt, TAU, WORK, LWORK, INFO )
+!
+!  ! /!\ int(WORK(1)) becomes negative when WORK(1) > 2147483648
+!  LWORK=max(n,int(WORK(1)))
+!
+!  deallocate(WORK)
+!  allocate(WORK(LWORK))
+!  call dgeqp3(m, n, A, LDA, jpvt, TAU, WORK, LWORK, INFO )
+!  print *,A
+!  print *,jpvt
+!  deallocate(WORK,TAU)
+!  !stop
+!
+!  !LWORK=-1
+!  !call dgeqrf( m, n, A, LDA, TAU, WORK, LWORK, INFO )
+!  !! /!\ int(WORK(1)) becomes negative when WORK(1) > 2147483648
+!  !LWORK=max(n,int(WORK(1)))
+!
+!  !deallocate(WORK)
+!  !allocate(WORK(LWORK))
+!  !call dgeqrf(m, n, A, LDA, TAU, WORK, LWORK, INFO )
+!
+!  !LWORK=-1
+!  !call dorgqr(m, n, n, A, LDA, TAU, WORK, LWORK, INFO)
+!  !! /!\ int(WORK(1)) becomes negative when WORK(1) > 2147483648
+!  !LWORK=max(n,int(WORK(1)))
+!
+!  !deallocate(WORK)
+!  !allocate(WORK(LWORK))
+!  !call dorgqr(m, n, n, A, LDA, TAU, WORK, LWORK, INFO)
+!  !
+!  !allocate(C(LDA,n))
+!  !call dgemm('N','N',m,n,n,1.0d0,B,LDA,A,LDA,0.0d0,C,LDA)
+!  !norm = 0.0d0
+!  !B = 0.0d0
+!  !!print *,C
+!  !do i=1,m
+!  !  norm = 0.0d0
+!  !  do j=1,n
+!  !    norm = norm + C(j,i)*C(j,i)
+!  !  end do
+!  !  norm = 1.0d0/dsqrt(norm)
+!  !  do j=1,n
+!  !    B(j,i) = C(j,i)
+!  !  end do
+!  !end do
+!  !print *,B
+!
+!
+!  !deallocate(WORK,TAU)
+!end
+!
+!subroutine ortho_qr_csf(A, LDA, B, m, n) bind(C, name="ortho_qr_csf")
+!  use iso_c_binding
+!  integer(c_int32_t), value      :: LDA
+!  integer(c_int32_t), value      :: m
+!  integer(c_int32_t), value      :: n
+!  integer(c_int16_t)             :: A(LDA,n)
+!  integer(c_int16_t)             :: B(LDA,n)
+!  call ortho_qr_withB(A,LDA,B,m,n)
+!end subroutine ortho_qr_csf
+
+
 subroutine ortho_qr(A,LDA,m,n)
   implicit none
   BEGIN_DOC
@@ -1574,78 +1675,378 @@ subroutine nullify_small_elements(m,n,A,LDA,thresh)
 end
 
 subroutine restore_symmetry(m,n,A,LDA,thresh)
+
   implicit none
+
   BEGIN_DOC
-! Tries to find the matrix elements that are the same, and sets them
-! to the average value.
-! If restore_symm is False, only nullify small elements
+  ! Tries to find the matrix elements that are the same, and sets them
+  ! to the average value.
+  ! If restore_symm is False, only nullify small elements
   END_DOC
+
   integer, intent(in) :: m,n,LDA
   double precision, intent(inout) :: A(LDA,n)
   double precision, intent(in) :: thresh
-  integer :: i,j,k,l
-  logical, allocatable :: done(:,:)
-  double precision :: f, g, count, thresh2
+
+  double precision, allocatable :: copy(:), copy_sign(:)
+  integer, allocatable :: key(:), ii(:), jj(:)
+  integer :: sze, pi, pf, idx, i,j,k
+  double precision :: average, val, thresh2
+
   thresh2 = dsqrt(thresh)
-  call nullify_small_elements(m,n,A,LDA,thresh)
 
-!  if (.not.restore_symm) then
-!    return
-!  endif
+  sze = m * n
 
-  ! TODO:  Costs O(n^4), but can be improved to (2 n^2 * log(n)):
-  ! - copy all values in a 1D array
-  ! - sort 1D array
-  ! - average nearby elements 
-  ! - for all elements, find matching value in the sorted 1D array
+  allocate(copy(sze),copy_sign(sze),key(sze),ii(sze),jj(sze))
 
-  allocate(done(m,n))
-
-  do j=1,n
-    do i=1,m
-      done(i,j) = A(i,j) == 0.d0
+  ! Copy to 1D
+  !$OMP PARALLEL if (m>100) &
+  !$OMP SHARED(A,m,n,sze,copy_sign,copy,key,ii,jj) &
+  !$OMP PRIVATE(i,j,k) &
+  !$OMP DEFAULT(NONE)
+  !$OMP DO
+  do j = 1, n
+    do i = 1, m
+      k = i+(j-1)*m
+      copy(k) = A(i,j)
+      copy_sign(k) = sign(1.d0,copy(k))
+      copy(k) = -dabs(copy(k))
+      key(k) = k
+      ii(k) = i
+      jj(k) = j
     enddo
   enddo
+  !$OMP END DO
+  !$OMP END PARALLEL
 
-  do j=1,n
-    do i=1,m
-      if ( done(i,j) ) cycle
-      done(i,j) = .True.
-      count = 1.d0
-      f = 1.d0/A(i,j)
-      do l=1,n
-        do k=1,m
-          if ( done(k,l) ) cycle
-          g = f * A(k,l)
-          if ( dabs(dabs(g) - 1.d0) < thresh2 ) then
-            count = count + 1.d0
-            if (g>0.d0) then
-              A(i,j) = A(i,j) + A(k,l)
-            else
-              A(i,j) = A(i,j) - A(k,l)
-            end if
-          endif
-        enddo
-      enddo
-      if (count > 1.d0) then
-        A(i,j) = A(i,j) / count
-        do l=1,n
-          do k=1,m
-            if ( done(k,l) ) cycle
-            g = f * A(k,l)
-            if ( dabs(dabs(g) - 1.d0) < thresh2 ) then
-              done(k,l) = .True.
-              if (g>0.d0) then
-                A(k,l) = A(i,j)
-              else
-                A(k,l) = -A(i,j)
-              end if
-            endif
-          enddo
-        enddo
+  ! Sort
+  call dsort(copy,key,sze)
+  call iset_order(ii,key,sze)
+  call iset_order(jj,key,sze)
+  call dset_order(copy_sign,key,sze)
+
+  !TODO
+  ! Parallelization with OMP
+
+!  ! Skip all the elements below thresh
+!  i = 1
+!  do while (copy(i) <= thresh)
+!    i = i + 1
+!  enddo
+
+  ! Symmetrize
+  i = 1
+  do while( (i < sze).and.(-copy(i) > thresh) )
+    pi = i
+    pf = i
+    val = 1d0/copy(i)
+    do while (dabs(val * copy(pf+1) - 1d0) < thresh2)
+      pf = pf + 1
+      ! if pf == sze, copy(pf+1) will not be valid
+      if (pf == sze) then
+        exit
       endif
-
     enddo
+    ! if pi and pf are different do the average from pi to pf
+    if (pf - pi > 0) then
+      average = 0d0
+      do j = pi, pf
+        average = average + copy(j)
+      enddo
+      average = average / (pf-pi+1.d0)
+      do j = pi, pf
+        copy(j) = average
+      enddo
+      ! Update i
+      i = pf
+    endif
+    ! Update i
+    i = i + 1
   enddo
+  copy(i:) = 0.d0
+
+  !$OMP PARALLEL if (sze>10000) &
+  !$OMP SHARED(m,sze,copy_sign,copy,key,A,ii,jj) &
+  !$OMP PRIVATE(i,j,k,idx) &
+  !$OMP DEFAULT(NONE)
+  ! copy -> A
+  !$OMP DO
+  do k = 1, sze
+      i = ii(k)
+      j = jj(k)
+      A(i,j) = sign(copy(k),copy_sign(k))
+  enddo
+  !$OMP END DO
+  !$OMP END PARALLEL
+
+  deallocate(copy,copy_sign,key,ii,jj)
 
 end
+
+!subroutine svd_s(A, LDA, U, LDU, D, Vt, LDVt, m, n)
+!  implicit none
+!  BEGIN_DOC
+!  ! !!!
+!  ! DGESVD computes the singular value decomposition (SVD) of a real
+!  ! M-by-N matrix A, optionally computing the left and/or right singular
+!  ! vectors. The SVD is written:
+!  !      A = U * SIGMA * transpose(V)
+!  ! where SIGMA is an M-by-N matrix which is zero except for its
+!  ! min(m,n) diagonal elements, U is an M-by-M orthogonal matrix, and
+!  ! V is an N-by-N orthogonal matrix.  The diagonal elements of SIGMA
+!  ! are the singular values of A; they are real and non-negative, and
+!  ! are returned in descending order.  The first min(m,n) columns of
+!  ! U and V are the left and right singular vectors of A.
+!  !
+!  ! Note that the routine returns V**T, not V.
+!  ! !!!
+!  END_DOC
+!
+!  integer, intent(in)             :: LDA, LDU, LDVt, m, n
+!  double precision, intent(in)    :: A(LDA,n)
+!  double precision, intent(out)   :: U(LDU,m), Vt(LDVt,n), D(min(m,n))
+!  double precision,allocatable    :: work(:), A_tmp(:,:)
+!  integer                         :: info, lwork, i, j, k
+!
+!
+!   allocate (A_tmp(LDA,n))
+!   do k=1,n
+!     do i=1,m
+!       !A_tmp(i,k) = A(i,k) + 1d-16
+!       A_tmp(i,k) = A(i,k)
+!     enddo
+!   enddo
+!
+!   ! Find optimal size for temp arrays
+!   allocate(work(1))
+!   lwork = -1
+!   ! 'A': all M columns of U are returned in array U
+!   ! 'A': all N rows of V**T are returned in the array VT
+!   call dgesvd('A', 'A', m, n, A_tmp, LDA, D, U, LDU, Vt, LDVt, work, lwork, info)
+!   ! /!\ int(WORK(1)) becomes negative when WORK(1) > 2147483648
+!   if( info.ne.0 ) then
+!     print *, ' problem in first call DGESVD !!!!'
+!     print *, ' info = ', info
+!     print *, '  < 0 : if INFO = -i, the i-th argument had an illegal value.'
+!     print *, '  > 0 : if DBDSQR did not converge, INFO specifies how many  '
+!     print *, '        superdiagonals of an intermediate bidiagonal form B  '
+!     print *, '        did not converge to zero. See the description of WORK'
+!     print *, '        above for details.                                   '
+!     stop
+!   endif
+!   lwork = max(int(work(1)), 5*MIN(M,N))
+!   deallocate(work)
+!
+!   allocate(work(lwork))
+!
+!   call dgesvd('A', 'A', m, n, A_tmp, LDA, D, U, LDU, Vt, LDVt, work, lwork, info)
+!   if( info.ne.0 ) then
+!     print *, ' problem in second call DGESVD !!!!'
+!     print *, ' info = ', info
+!     print *, '  < 0 : if INFO = -i, the i-th argument had an illegal value.'
+!     print *, '  > 0 : if DBDSQR did not converge, INFO specifies how many  '
+!     print *, '        superdiagonals of an intermediate bidiagonal form B  '
+!     print *, '        did not converge to zero. See the description of WORK'
+!     print *, '        above for details.                                   '
+!     stop
+!   endif
+!
+!   deallocate(A_tmp,work)
+!
+!   !do j=1, m
+!   !  do i=1, LDU
+!   !    if (dabs(U(i,j)) < 1.d-14)  U(i,j) = 0.d0
+!   !  enddo
+!   !enddo
+!   !do j = 1, n
+!   !  do i = 1, LDVt
+!   !    if (dabs(Vt(i,j)) < 1.d-14) Vt(i,j) = 0.d0
+!   !  enddo
+!   !enddo
+!
+!end
+!
+
+! ---
+
+subroutine diag_nonsym_right(n, A, A_ldim, V, V_ldim, energy, E_ldim)
+
+  implicit none
+
+  integer,          intent(in)  :: n, A_ldim, V_ldim, E_ldim
+  double precision, intent(in)  :: A(A_ldim,n)
+  double precision, intent(out) :: energy(E_ldim), V(V_ldim,n)
+
+  character*1                   :: JOBVL, JOBVR, BALANC, SENSE
+  integer                       :: i, j
+  integer                       :: ILO, IHI, lda, ldvl, ldvr, LWORK, INFO
+  double precision              :: ABNRM
+  integer,          allocatable :: iorder(:), IWORK(:)
+  double precision, allocatable :: WORK(:), SCALE_array(:), RCONDE(:), RCONDV(:)
+  double precision, allocatable :: Atmp(:,:), WR(:), WI(:), VL(:,:), VR(:,:), Vtmp(:)
+  double precision, allocatable :: energy_loc(:), V_loc(:,:)
+
+  allocate( Atmp(n,n), WR(n), WI(n), VL(1,1), VR(n,n) )
+  do i = 1, n
+    do j = 1, n
+      Atmp(j,i) = A(j,i)
+    enddo
+  enddo
+
+  JOBVL  = "N" ! computes the left  eigenvectors
+  JOBVR  = "V" ! computes the right eigenvectors
+  BALANC = "B" ! Diagonal scaling and Permutation for optimization
+  SENSE  = "V" ! Determines which reciprocal condition numbers are computed
+  lda  = n
+  ldvr = n
+  ldvl = 1
+
+  allocate( WORK(1), SCALE_array(n), RCONDE(n), RCONDV(n), IWORK(2*n-2) )
+
+  LWORK = -1 ! to ask for the optimal size of WORK
+  call dgeevx( BALANC, JOBVL, JOBVR, SENSE                  & ! CHARACTERS
+             , n, Atmp, lda                                 & ! MATRIX TO DIAGONALIZE
+             , WR, WI                                       & ! REAL AND IMAGINARY PART OF EIGENVALUES
+             , VL, ldvl, VR, ldvr                           & ! LEFT AND RIGHT EIGENVECTORS
+             , ILO, IHI, SCALE_array, ABNRM, RCONDE, RCONDV & ! OUTPUTS OF OPTIMIZATION
+             , WORK, LWORK, IWORK, INFO )
+
+  if(INFO .ne. 0) then
+    print*, 'dgeevx failed !!', INFO
+    stop
+  endif
+
+  LWORK = max(int(work(1)), 1) ! this is the optimal size of WORK
+  deallocate(WORK)
+  allocate(WORK(LWORK))
+  call dgeevx( BALANC, JOBVL, JOBVR, SENSE                  &
+             , n, Atmp, lda                                 &
+             , WR, WI                                       &
+             , VL, ldvl, VR, ldvr                           &
+             , ILO, IHI, SCALE_array, ABNRM, RCONDE, RCONDV &
+             , WORK, LWORK, IWORK, INFO )
+  if(INFO .ne. 0) then
+    print*, 'dgeevx failed !!', INFO
+    stop
+  endif
+
+  deallocate( WORK, SCALE_array, RCONDE, RCONDV, IWORK )
+  deallocate( VL, Atmp )
+
+
+  allocate( energy_loc(n), V_loc(n,n) )
+  energy_loc = 0.d0
+  V_loc = 0.d0
+
+  i = 1
+  do while(i .le. n)
+
+!    print*, i, WR(i), WI(i)
+
+    if( dabs(WI(i)) .gt. 1e-7 ) then
+
+      print*, ' Found an imaginary component to eigenvalue'
+      print*, ' Re(i) + Im(i)', i, WR(i), WI(i)
+
+      energy_loc(i) = WR(i)
+      do j = 1, n
+        V_loc(j,i) = WR(i) * VR(j,i) - WI(i) * VR(j,i+1)
+      enddo
+      energy_loc(i+1) = WI(i)
+      do j = 1, n
+        V_loc(j,i+1) = WR(i) * VR(j,i+1) + WI(i) * VR(j,i)
+      enddo
+      i = i + 2
+
+    else
+
+      energy_loc(i) = WR(i)
+      do j = 1, n
+        V_loc(j,i) = VR(j,i)
+      enddo
+      i = i + 1
+
+    endif
+
+  enddo
+
+  deallocate(WR, WI, VR)
+
+
+  ! ordering
+!  do j = 1, n
+!    write(444, '(100(1X, F16.10))') (V_loc(j,i), i=1,5)
+!  enddo
+  allocate( iorder(n) )
+  do i = 1, n
+    iorder(i) = i
+  enddo
+  call dsort(energy_loc, iorder, n)
+  do i = 1, n
+    energy(i) = energy_loc(i)
+    do j = 1, n
+      V(j,i) = V_loc(j,iorder(i))
+    enddo
+  enddo
+  deallocate(iorder)
+!  do j = 1, n
+!    write(445, '(100(1X, F16.10))') (V_loc(j,i), i=1,5)
+!  enddo
+  deallocate(V_loc, energy_loc)
+
+end subroutine diag_nonsym_right
+
+! ---
+
+! Taken from GammCor thanks to Michal Hapka :-)
+
+
+subroutine pivoted_cholesky( A, rank, tol, ndim, U)
+!
+! A = U**T * U
+!
+! matrix A is destroyed inside this subroutine
+! Cholesky vectors are stored in U
+! dimension of U: U(1:rank, 1:n)
+! U is allocated inside this subroutine
+! rank is the number of Cholesky vectors depending on tol
+!
+integer :: ndim
+integer, intent(inout)                                        :: rank
+double precision, dimension(ndim, ndim), intent(inout)        :: A
+double precision, dimension(ndim, rank), intent(out)          :: U
+double precision, intent(in)                                  :: tol
+
+integer, dimension(:), allocatable          :: piv
+double precision, dimension(:), allocatable :: work
+character, parameter :: uplo = "U"
+integer :: N, LDA
+integer :: info
+integer :: k, l, rank0
+external :: dpstrf
+
+rank0 = rank
+N = size(A, dim=1)
+LDA = N
+allocate(piv(N))
+allocate(work(2*N))
+call dpstrf(uplo, N, A, LDA, piv, rank, tol, work, info)
+
+if (rank > rank0) then
+  print *, 'Bug: rank > rank0 in pivoted cholesky. Increase rank before calling'
+  stop
+end if
+
+do k = 1, N
+  A(k+1:, k) = 0.00D+0
+end do
+! TODO: It should be possible to use only one vector of size (1:rank) as a buffer
+! to do the swapping in-place
+U = 0.00D+0
+do k = 1, N
+  l = piv(k)
+  U(l, :) = A(1:rank, k)
+end do
+
+end subroutine pivoted_cholesky
+

@@ -77,31 +77,28 @@ BEGIN_PROVIDER [ integer, psi_det_size ]
   END_DOC
   PROVIDE ezfio_filename
   logical                        :: exists
-  psi_det_size = 1
-  PROVIDE mpi_master
-  if (read_wf) then
-    if (mpi_master) then
-      call ezfio_has_determinants_n_det(exists)
-      if (exists) then
-        call ezfio_get_determinants_n_det(psi_det_size)
-      else
-        psi_det_size = 1
-      endif
-      call write_int(6,psi_det_size,'Dimension of the psi arrays')
+  if (mpi_master) then
+    call ezfio_has_determinants_n_det(exists)
+    if (exists) then
+      call ezfio_get_determinants_n_det(psi_det_size)
+    else
+      psi_det_size = 1
     endif
-    IRP_IF MPI_DEBUG
-      print *,  irp_here, mpi_rank
-      call MPI_BARRIER(MPI_COMM_WORLD, ierr)
-    IRP_ENDIF
-    IRP_IF MPI
-      include 'mpif.h'
-      integer                        :: ierr
-      call MPI_BCAST( psi_det_size, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
-      if (ierr /= MPI_SUCCESS) then
-        stop 'Unable to read psi_det_size with MPI'
-      endif
-    IRP_ENDIF
+    call write_int(6,psi_det_size,'Dimension of the psi arrays')
   endif
+  IRP_IF MPI_DEBUG
+    print *,  irp_here, mpi_rank
+    call MPI_BARRIER(MPI_COMM_WORLD, ierr)
+  IRP_ENDIF
+  IRP_IF MPI
+    include 'mpif.h'
+    integer                        :: ierr
+    call MPI_BCAST( psi_det_size, 1, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+    if (ierr /= MPI_SUCCESS) then
+      stop 'Unable to read psi_det_size with MPI'
+    endif
+  IRP_ENDIF
+
 
 END_PROVIDER
 
@@ -174,22 +171,24 @@ BEGIN_PROVIDER [ integer(bit_kind), psi_det, (N_int,2,psi_det_size) ]
 
 END_PROVIDER
 
-
+! ---
 
 BEGIN_PROVIDER [ double precision, psi_coef, (psi_det_size,N_states) ]
-  implicit none
+
   BEGIN_DOC
   ! The wave function coefficients. Initialized with Hartree-Fock if the |EZFIO| file
   ! is empty.
   END_DOC
 
+  implicit none
   integer                        :: i,k, N_int2
   logical                        :: exists
   character*(64)                 :: label
 
   PROVIDE read_wf N_det mo_label ezfio_filename
+
   psi_coef = 0.d0
-  do i=1,min(N_states,psi_det_size)
+  do i = 1, min(N_states, psi_det_size)
     psi_coef(i,i) = 1.d0
   enddo
 
@@ -233,9 +232,9 @@ BEGIN_PROVIDER [ double precision, psi_coef, (psi_det_size,N_states) ]
     endif
   IRP_ENDIF
 
-
-
 END_PROVIDER
+
+! ---
 
 BEGIN_PROVIDER [ double precision, psi_average_norm_contrib, (psi_det_size) ]
   implicit none
@@ -330,6 +329,7 @@ END_PROVIDER
 
  BEGIN_PROVIDER [ integer(bit_kind), psi_det_sorted_bit, (N_int,2,psi_det_size) ]
 &BEGIN_PROVIDER [ double precision, psi_coef_sorted_bit, (psi_det_size,N_states) ]
+&BEGIN_PROVIDER [ integer, psi_det_sorted_bit_order, (psi_det_size) ]
    implicit none
    BEGIN_DOC
    ! Determinants on which we apply $\langle i|H|psi \rangle$ for perturbation.
@@ -338,8 +338,8 @@ END_PROVIDER
    ! function.
    END_DOC
 
-   call sort_dets_by_det_search_key(N_det, psi_det, psi_coef, size(psi_coef,1),       &
-       psi_det_sorted_bit, psi_coef_sorted_bit, N_states)
+   call sort_dets_by_det_search_key_ordered(N_det, psi_det, psi_coef, size(psi_coef,1),       &
+       psi_det_sorted_bit, psi_coef_sorted_bit, N_states, psi_det_sorted_bit_order)
 
 END_PROVIDER
 
@@ -589,6 +589,68 @@ subroutine save_wavefunction_general(ndet,nstates,psidet,dim_psicoef,psicoef)
   endif
 end
 
+
+subroutine save_wavefunction_general_unormalized(ndet,nstates,psidet,dim_psicoef,psicoef)
+  implicit none
+  BEGIN_DOC
+  !  Save the wave function into the |EZFIO| file
+  END_DOC
+  use bitmasks
+  include 'constants.include.F'
+  integer, intent(in)            :: ndet,nstates,dim_psicoef
+  integer(bit_kind), intent(in)  :: psidet(N_int,2,ndet)
+  double precision, intent(in)   :: psicoef(dim_psicoef,nstates)
+  integer*8, allocatable         :: psi_det_save(:,:,:)
+  double precision, allocatable  :: psi_coef_save(:,:)
+
+  double precision               :: accu_norm
+  integer                        :: i,j,k, ndet_qp_edit
+
+  if (mpi_master) then
+    ndet_qp_edit = min(ndet,N_det_qp_edit)
+
+    call ezfio_set_determinants_N_int(N_int)
+    call ezfio_set_determinants_bit_kind(bit_kind)
+    call ezfio_set_determinants_N_det(ndet)
+    call ezfio_set_determinants_N_det_qp_edit(ndet_qp_edit)
+    call ezfio_set_determinants_n_states(nstates)
+    call ezfio_set_determinants_mo_label(mo_label)
+
+    allocate (psi_det_save(N_int,2,ndet))
+    do i=1,ndet
+      do j=1,2
+        do k=1,N_int
+          psi_det_save(k,j,i) = transfer(psidet(k,j,i),1_8)
+        enddo
+      enddo
+    enddo
+    call ezfio_set_determinants_psi_det(psi_det_save)
+    call ezfio_set_determinants_psi_det_qp_edit(psi_det_save)
+    deallocate (psi_det_save)
+
+    allocate (psi_coef_save(ndet,nstates))
+    do k=1,nstates
+      do i=1,ndet
+        psi_coef_save(i,k) = psicoef(i,k)
+      enddo
+    enddo
+
+    call ezfio_set_determinants_psi_coef(psi_coef_save)
+    deallocate (psi_coef_save)
+
+    allocate (psi_coef_save(ndet_qp_edit,nstates))
+    do k=1,nstates
+      do i=1,ndet_qp_edit
+        psi_coef_save(i,k) = psicoef(i,k)
+      enddo
+    enddo
+
+    call ezfio_set_determinants_psi_coef_qp_edit(psi_coef_save)
+    deallocate (psi_coef_save)
+
+    call write_int(6,ndet,'Saved determinants')
+  endif
+end
 
 
 subroutine save_wavefunction_specified(ndet,nstates,psidet,psicoef,ndetsave,index_det_save)
@@ -942,5 +1004,50 @@ BEGIN_PROVIDER [ double precision, psi_det_Hii, (N_det) ]
  enddo
  !$OMP END PARALLEL DO
 END_PROVIDER
+
+
+subroutine sort_dets_by_det_search_key_ordered(Ndet, det_in, coef_in, sze, det_out, coef_out, N_st, iorder)
+   use bitmasks
+   implicit none
+   integer, intent(in)            :: Ndet, N_st, sze
+   integer(bit_kind), intent(in)  :: det_in  (N_int,2,sze)
+   double precision , intent(in)  :: coef_in(sze,N_st)
+   integer(bit_kind), intent(out) :: det_out (N_int,2,sze)
+   double precision , intent(out) :: coef_out(sze,N_st)
+   integer, intent(out)           :: iorder(sze)
+   BEGIN_DOC
+   ! Determinants are sorted according to their :c:func:`det_search_key`.
+   ! Useful to accelerate the search of a random determinant in the wave
+   ! function.
+   !
+   ! /!\ The first dimension of coef_out and coef_in need to be psi_det_size
+   !
+   END_DOC
+   integer                        :: i,j,k
+   integer*8, allocatable         :: bit_tmp(:)
+   integer*8, external            :: det_search_key
+
+   allocate ( bit_tmp(Ndet) )
+
+   do i=1,Ndet
+     iorder(i) = i
+     !$DIR FORCEINLINE
+     bit_tmp(i) = det_search_key(det_in(1,1,i),N_int)
+   enddo
+   call i8sort(bit_tmp,iorder,Ndet)
+   !DIR$ IVDEP
+   do i=1,Ndet
+     do j=1,N_int
+       det_out(j,1,i) = det_in(j,1,iorder(i))
+       det_out(j,2,i) = det_in(j,2,iorder(i))
+     enddo
+     do k=1,N_st
+       coef_out(i,k) = coef_in(iorder(i),k)
+     enddo
+   enddo
+
+   deallocate(bit_tmp)
+
+end
 
 
